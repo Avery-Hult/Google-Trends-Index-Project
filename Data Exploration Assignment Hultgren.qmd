@@ -1,0 +1,170 @@
+---
+title: "Data Exploration Assignment"
+author: "Avery Hultgren"
+format: html
+editor: visual
+---
+
+```{r}
+library(rio)
+library(dplyr)
+library(tidyverse)
+library(fixest)
+library(ggplot2)
+library(lubridate)
+library(vtable)
+```
+
+Data Cleaning
+
+```{r}
+gtrend <- import_list(list.files(path = "~/Econometrics/Data_Exploration_Rawdata/Lab3_Rawdata", full.names = TRUE),fill = TRUE, rbind = TRUE)
+```
+
+```{r}
+gtrend <- gtrend %>% 
+  mutate(monthorweek = ymd(str_sub(string = monthorweek, start = 1, end = 10)))
+```
+
+```{r}
+gtrend <- gtrend %>%
+  group_by(schname, keyword) %>%
+  mutate(index = (index - mean(index))/sd(index))
+```
+
+"Now, a one-unit change in the standardized `index` can be understood and interpreted as a one-standard-deviation change in search interest"
+
+```{r}
+cohorts <- import('Most+Recent+Cohorts+(Scorecard+Elements).csv', fill = TRUE)
+
+colnames(cohorts)[colnames(cohorts) == "OPEID"] ="opeid"
+
+idlink <- import('id_name_link.csv', fill = TRUE)
+```
+
+```{r}
+idlink <- idlink %>%
+  group_by(schname) %>%
+  mutate(n = n()) %>%
+  filter(n == 1)
+```
+
+Join data sets together
+
+```{r}
+idlink <- inner_join(idlink, cohorts, by = 'opeid')
+
+```
+
+```{r}
+gtrend <- inner_join(gtrend,idlink, by = 'schname')
+```
+
+Get rid of all colleges and universities that do not predominately give bachelor's degrees
+
+```{r}
+gtrend <- gtrend %>%
+  mutate(n = n()) %>%
+  filter(PREDDEG == 3)
+```
+
+**Data Exploration**
+
+**Question:** *Among colleges that predominantly grant bachelor's degrees, did the release of the Scorecard shift student interest to high-earnings colleges relative to low-earnings ones (as proxied by Google searches for keywords associated with those colleges)?*
+
+**Work the data**
+
+```{r}
+gtrend <- gtrend %>%
+  select(schname, keyword, schid,index,'md_earn_wne_p10-REPORTED-EARNINGS',keynum,monthorweek,opeid,unitid)
+
+```
+
+**Split up schools via high and low earnings colleges**
+
+```{r}
+gtrend <- gtrend %>%
+  rename(mdearn10 = `md_earn_wne_p10-REPORTED-EARNINGS`)
+```
+
+```{r}
+gtrend$`mdearn10` <- as.numeric(gtrend$`mdearn10`)
+```
+
+```{r}
+gtrend <- na.omit(gtrend)
+```
+
+**split data up before and after the scorecard was shown**
+
+```{r}
+gtrend <- gtrend %>% 
+  mutate(BoA = ifelse(ymd(monthorweek) >= ymd("2015-09-01"), 1, 0))
+```
+
+```{r}
+gtrend <- gtrend %>%
+  filter(BoA == 1)
+```
+
+**create new data sets of only high or lower earnings schools**
+
+```{r}
+bigmon <- gtrend %>%
+  mutate(n = n()) %>%
+  filter(mdearn10 >= 65000)
+smolmon <- gtrend %>%
+  mutate(n = n()) %>%
+  filter(mdearn10 <= 30000)
+```
+
+**Run a regression of both the high and low earnings schools**
+
+```{r}
+Sch_Reg_High <- feols(index ~ monthorweek + mdearn10, data =  bigmon, vcov = 'hetero')
+```
+
+```{r}
+Sch_Reg_Low <- feols(index ~ monthorweek+mdearn10, data =  smolmon, vcov = 'hetero')
+```
+
+```{r}
+etable(Sch_Reg_High,Sch_Reg_Low)
+```
+
+**Create graphs of both regressions**
+
+```{r}
+plotHigh <- ggplot(data = bigmon, xlim = c(0, 15), ylim = c(0, 11), aes(x =monthorweek , y =(index))) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(x = "Timeline", y = "index") +
+  ggtitle("Scatterplot of Regression at high earnings schools")
+```
+
+```{r}
+plotLow <- ggplot(data = smolmon, xlim = c(0, 15), ylim = c(0, 11), aes(x =(monthorweek) , y =(index))) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(x = "Timeline", y = "index") +
+  ggtitle("Scatterplot of Regression at low earnings schools ")
+```
+
+```{r}
+layout(matrix(c(1, 2)))
+
+print(plotLow)
+print(plotHigh)
+```
+
+-   **Explain why you are performing the analysis you are performing, and the choices you made in putting it together**
+
+I chose to investigate the connection between the median earnings of students after 10 years and the index for the schools that were on the high and low end of the median. To do this I created two separate data sets, one with median earnings above and equal to \$65,000/yr and the other with earnings below or equal to \$30,000/yr. I then created a regression for each and regressed the index on to the median earnings of the two separate school groups, while controlling for the dates.
+
+-   **Explain how your analysis addresses the research question**
+
+My analysis shows that after September 2015 there was little difference in the slope of the college indexes between high earning and low earning colleges.
+
+-   **Explain what we should conclude, in real world terms, based on your results** 
+
+Based on my results I believe that we should conclude that there was a insignificant amount of change in college searches due to the college scorecard being released by Google. This means that many people probably did not know about the scorecard or did not factor it into there college searches.
